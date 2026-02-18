@@ -36,7 +36,7 @@ When the plugin reaches release readiness:
 4. Click **Load unpacked**.
 5. Select the `keepass-plugin/` folder.
 
-> Note: this milestone is a scaffold and does not yet include the final packaging/bundling flow for production assets.
+> Note: for this scaffold, runtime entry files (`background.js`, `content.js`, `popup.js`) are committed so **Load unpacked** works without a build step.
 
 ## Milestone 1 structure
 - `manifest.json` — extension metadata and script wiring.
