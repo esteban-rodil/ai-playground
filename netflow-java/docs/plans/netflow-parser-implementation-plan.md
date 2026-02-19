@@ -196,8 +196,9 @@ netflow-java/
    - Wire the `UdpPacketListener` as the channel handler
 4. **Create `UdpPacketListener.java`** — Netty `SimpleChannelInboundHandler<DatagramPacket>`:
    - Extract `ByteBuf` content from the datagram
+   - Extract sender `InetAddress` from the `DatagramPacket`
    - Convert to `byte[]` and log packet size + source address
-   - Forward bytes to `PacketDispatcher`
+   - Forward bytes and sender address to `PacketDispatcher`
 5. **Create `application.yml`** with:
    ```yaml
    netflow:
@@ -236,24 +237,35 @@ netflow-java/
    }
    ```
 
-3. **`FlowRecord` sealed interface** — Common flow record contract:
+3. **`FlowRecord` sealed interface** — Common flow record contract. The base interface is kept minimal because v9 templates are arbitrary and may omit any field. Version-specific accessors live on the concrete types:
    ```java
    public sealed interface FlowRecord permits V5FlowRecord, V9FlowRecord {
-       String srcAddress();
-       String dstAddress();
-       int srcPort();
-       int dstPort();
-       int protocol();
-       long bytes();
-       long packets();
+       /** The NetFlow version that produced this record. */
+       NetflowVersion version();
+
+       /**
+        * Retrieve a field value by type. Returns Optional.empty() when the
+        * field is not present in the record (common for template-based v9).
+        */
+       Optional<Object> getField(FieldType fieldType);
+
+       /** Convenience accessors — return Optional to accommodate v9 templates that may omit fields. */
+       default Optional<String> srcAddress()  { return getField(FieldType.IPV4_SRC_ADDR).map(Object::toString); }
+       default Optional<String> dstAddress()  { return getField(FieldType.IPV4_DST_ADDR).map(Object::toString); }
+       default Optional<Integer> srcPort()    { return getField(FieldType.L4_SRC_PORT).map(v -> (Integer) v); }
+       default Optional<Integer> dstPort()    { return getField(FieldType.L4_DST_PORT).map(v -> (Integer) v); }
+       default Optional<Integer> protocol()   { return getField(FieldType.PROTOCOL).map(v -> (Integer) v); }
+       default Optional<Long> bytes()         { return getField(FieldType.IN_BYTES).map(v -> (Long) v); }
+       default Optional<Long> packets()       { return getField(FieldType.IN_PKTS).map(v -> (Long) v); }
    }
    ```
+   `V5FlowRecord` implements `getField()` by mapping its fixed fields to the corresponding `FieldType`. `V9FlowRecord` delegates to its internal `Map<FieldType, Object>`. This design lets CSV and logging handlers work uniformly across versions while gracefully handling missing fields.
 
 4. **`NetflowParser` interface:**
    ```java
    public interface NetflowParser {
        NetflowVersion version();
-       ParseResult parse(byte[] data);
+       ParseResult parse(byte[] data, InetAddress exporterAddress);
    }
    ```
    Where `ParseResult` is a record containing the header and a list of flow records.
@@ -275,7 +287,7 @@ netflow-java/
    }
    ```
 
-7. **`PacketDispatcher`** — Reads version (first 2 bytes), resolves parser via factory, dispatches parsed results to all registered handlers.
+7. **`PacketDispatcher`** — Receives raw bytes and the exporter `InetAddress`. Reads version (first 2 bytes), resolves parser via factory (passing the exporter address to v9 for template cache scoping), dispatches parsed results to all registered handlers.
 
 8. **`FieldType` enum** — Maps known NetFlow field type IDs to names and default sizes:
    ```java
@@ -351,7 +363,7 @@ netflow-java/
    - Return `ParseResult` with header + list of records
    - Handle edge cases: truncated packets, count = 0, count > 30
 
-4. **`LoggingFlowHandler`** — Logs each flow record with structured fields:
+4. **`LoggingFlowHandler`** — Logs each flow record with structured fields (uses `Optional`-aware accessors so missing v9 fields render as `N/A`):
    ```
    Received v5 flow: src=192.168.1.1:443 dst=10.0.0.5:52341 proto=TCP bytes=15234 packets=12
    ```
@@ -392,9 +404,9 @@ netflow-java/
    ```
 
 3. **`TemplateCache`:**
-   - Thread-safe map keyed by composite key `(sourceId, templateId)`
+   - Thread-safe map keyed by composite key `(exporterIp, sourceId, templateId)` — the exporter IP is required because Source ID is only unique per exporter; different devices can (and commonly do) reuse the same Source ID (e.g., many Cisco routers default to `0`)
    - Configurable TTL for template expiration (default: 30 minutes)
-   - `put(Template)`, `get(long sourceId, int templateId)` → `Optional<Template>`
+   - `put(InetAddress exporterIp, Template)`, `get(InetAddress exporterIp, long sourceId, int templateId)` → `Optional<Template>`
    - Uses `ConcurrentHashMap` with periodic eviction or time-based check on read
    - Log warning when a Data FlowSet references an unknown template
 
@@ -415,8 +427,13 @@ netflow-java/
        Map<FieldType, Object> fields,
        Map<Integer, byte[]> unknownFields
    ) implements FlowRecord {
-       // Implement FlowRecord interface methods by looking up known keys
-       // e.g., srcAddress() → fields.get(FieldType.IPV4_SRC_ADDR)
+       @Override
+       public NetflowVersion version() { return NetflowVersion.V9; }
+
+       @Override
+       public Optional<Object> getField(FieldType fieldType) {
+           return Optional.ofNullable(fields.get(fieldType));
+       }
    }
    ```
 
