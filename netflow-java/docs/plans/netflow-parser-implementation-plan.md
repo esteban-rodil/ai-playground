@@ -530,6 +530,7 @@ netflow-java/
      absoluteTime = unixSecs - (sysUpTime - switchedTime) / 1000
      ```
      Start from the packet's export wall-clock (`unixSecs`), subtract how long ago the flow started/ended relative to device uptime. Adding `switchedTime` directly would place records far in the future on long-running devices.
+   - **32-bit uptime wrap:** Both `sysUpTime` and `switchedTime` are unsigned 32-bit millisecond counters that wrap every ~49.7 days. The delta `(sysUpTime - switchedTime)` must use **unsigned modular subtraction** (i.e., `Integer.toUnsignedLong(sysUpTime - switchedTime)` in Java) so that a flow that started before a wrap boundary and was exported after it still produces the correct positive offset instead of a large negative value that would corrupt the resulting timestamp.
    - Apply the same formula for both `firstSwitched` and `lastSwitched`
    - Format result as ISO-8601
 
