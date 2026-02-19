@@ -267,11 +267,13 @@ netflow-java/
        default Optional<Integer> srcPort()    { return getField(FieldType.L4_SRC_PORT).map(v -> (Integer) v); }
        default Optional<Integer> dstPort()    { return getField(FieldType.L4_DST_PORT).map(v -> (Integer) v); }
        default Optional<Integer> protocol()   { return getField(FieldType.PROTOCOL).map(v -> (Integer) v); }
-       default Optional<Long> bytes()         { return getField(FieldType.IN_BYTES).map(v -> (Long) v); }
-       default Optional<Long> packets()       { return getField(FieldType.IN_PKTS).map(v -> (Long) v); }
+       default Optional<Long> bytes()         { return getField(FieldType.IN_BYTES).map(v -> ((Number) v).longValue()); }
+       default Optional<Long> packets()       { return getField(FieldType.IN_PKTS).map(v -> ((Number) v).longValue()); }
    }
    ```
-   `V5FlowRecord` implements `getField()` by mapping its fixed fields to the corresponding `FieldType`. `V9FlowRecord` delegates to its internal `Map<FieldType, Object>`. This design lets CSV and logging handlers work uniformly across versions while gracefully handling missing fields.
+   `V5FlowRecord` implements `getField()` by mapping its fixed fields to the corresponding `FieldType`. `V9FlowRecord` delegates to its internal `Map<FieldType, Object>`.
+
+   **Numeric normalization:** v9 field decoding is template-length-driven — `IN_BYTES` / `IN_PKTS` may arrive as 1-, 2-, 4-, or 8-byte values and end up stored as `Integer` or `Long` depending on width. The typed accessors above use `((Number) v).longValue()` (safe widening) so callers always receive `Long` regardless of the underlying boxed type. The same pattern applies to any future accessor that returns a numeric type wider than the decoded value. Port and protocol accessors remain `(Integer)` casts because their template-defined widths (1–2 bytes) always decode within `Integer` range.
 
 4. **`NetflowParser` interface:**
    ```java
@@ -459,6 +461,7 @@ netflow-java/
 
 7. **`V9Parser` implementation:**
    - Parse 20-byte header
+   - **FlowSet length validation:** Before processing each FlowSet, read its 16-bit `length` field and validate: (a) `length >= 4` (the minimum — 2-byte FlowSet ID + 2-byte length), and (b) `length <= remainingBytes`. If either check fails, log a WARN with the offending value and **drop the rest of the packet** (subsequent FlowSets cannot be located reliably when a length field is corrupt). This prevents a `length=0` from stalling the cursor in an infinite loop and an oversized length from reading past buffer bounds — both trivially exploitable on an unauthenticated UDP collector.
    - Loop through FlowSets based on remaining bytes:
      - **FlowSet ID = 0 (Template FlowSet):** Parse template definitions, store in `TemplateCache` with `kind = FLOW`
      - **FlowSet ID = 1 (Options Template FlowSet):** Parse scope/option field definitions, store in `TemplateCache` with `kind = OPTIONS`
