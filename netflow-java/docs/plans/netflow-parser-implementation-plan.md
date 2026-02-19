@@ -525,8 +525,13 @@ netflow-java/
    - On file rotation, triggers storage upload (if storage is enabled)
 
 4. **Timestamp handling:**
-   - Compute absolute timestamp from header `unixSecs` + record `firstSwitched`/`lastSwitched` relative to `sysUpTime`
-   - Format as ISO-8601
+   - `firstSwitched` and `lastSwitched` are **exporter-uptime counters** (milliseconds since device boot), not Unix timestamps. The correct conversion per RFC 3954 is:
+     ```
+     absoluteTime = unixSecs - (sysUpTime - switchedTime) / 1000
+     ```
+     Start from the packet's export wall-clock (`unixSecs`), subtract how long ago the flow started/ended relative to device uptime. Adding `switchedTime` directly would place records far in the future on long-running devices.
+   - Apply the same formula for both `firstSwitched` and `lastSwitched`
+   - Format result as ISO-8601
 
 **Deliverables:** CSV files are generated in the output directory with correct headers and flow data. Files rotate per configuration.
 
@@ -588,9 +593,20 @@ netflow-java/
    - Credentials via default provider chain
 
 6. **`StorageConfig`** — Conditional bean registration:
-   - `@ConditionalOnProperty(name = "netflow.storage.type", havingValue = "s3")` → registers `S3StorageService`
-   - `@ConditionalOnProperty(name = "netflow.storage.type", havingValue = "ftp")` → registers `FtpStorageService`
-   - `@ConditionalOnProperty(name = "netflow.storage.enabled", havingValue = "false")` → no-op / skip
+   - Each backend bean is guarded by **both** conditions combined so no bean is ever created when storage is disabled:
+     ```java
+     @Bean
+     @ConditionalOnProperty(name = "netflow.storage.enabled", havingValue = "true")
+     @ConditionalOnProperty(name = "netflow.storage.type",    havingValue = "s3")
+     public StorageService s3StorageService(...) { ... }
+
+     @Bean
+     @ConditionalOnProperty(name = "netflow.storage.enabled", havingValue = "true")
+     @ConditionalOnProperty(name = "netflow.storage.type",    havingValue = "ftp")
+     public StorageService ftpStorageService(...) { ... }
+     ```
+   - When `enabled=false` (the default) no `StorageService` bean is registered at all, eliminating the ambiguous-candidate risk.
+   - `CsvFlowHandler` declares `StorageService` as an `Optional` injection (`@Autowired(required = false)`) so it starts cleanly even when no backend is active.
 
 7. **Upload trigger** — `CsvFlowHandler` calls `StorageService.upload()` after each file rotation (if enabled). This runs asynchronously via `@Async` or a dedicated executor to avoid blocking the parsing pipeline.
 
