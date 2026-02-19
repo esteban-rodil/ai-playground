@@ -264,16 +264,16 @@ netflow-java/
                .or(() -> getField(FieldType.IPV6_DST_ADDR))
                .map(Object::toString);
        }
-       default Optional<Integer> srcPort()    { return getField(FieldType.L4_SRC_PORT).map(v -> (Integer) v); }
-       default Optional<Integer> dstPort()    { return getField(FieldType.L4_DST_PORT).map(v -> (Integer) v); }
-       default Optional<Integer> protocol()   { return getField(FieldType.PROTOCOL).map(v -> (Integer) v); }
+       default Optional<Integer> srcPort()    { return getField(FieldType.L4_SRC_PORT).map(v -> ((Number) v).intValue()); }
+       default Optional<Integer> dstPort()    { return getField(FieldType.L4_DST_PORT).map(v -> ((Number) v).intValue()); }
+       default Optional<Integer> protocol()   { return getField(FieldType.PROTOCOL).map(v -> ((Number) v).intValue()); }
        default Optional<Long> bytes()         { return getField(FieldType.IN_BYTES).map(v -> ((Number) v).longValue()); }
        default Optional<Long> packets()       { return getField(FieldType.IN_PKTS).map(v -> ((Number) v).longValue()); }
    }
    ```
    `V5FlowRecord` implements `getField()` by mapping its fixed fields to the corresponding `FieldType`. `V9FlowRecord` delegates to its internal `Map<FieldType, Object>`.
 
-   **Numeric normalization:** v9 field decoding is template-length-driven — `IN_BYTES` / `IN_PKTS` may arrive as 1-, 2-, 4-, or 8-byte values and end up stored as `Integer` or `Long` depending on width. The typed accessors above use `((Number) v).longValue()` (safe widening) so callers always receive `Long` regardless of the underlying boxed type. The same pattern applies to any future accessor that returns a numeric type wider than the decoded value. Port and protocol accessors remain `(Integer)` casts because their template-defined widths (1–2 bytes) always decode within `Integer` range.
+   **Numeric normalization:** v9 field decoding is template-length-driven — field values may arrive as 1-, 2-, 4-, or 8-byte values and end up boxed as `Byte`, `Short`, `Integer`, or `Long` depending on width. **All** typed accessors use safe widening via `((Number) v).intValue()` or `((Number) v).longValue()` so callers always receive a consistent type regardless of the underlying boxed representation. This prevents `ClassCastException` for any template-defined width.
 
 4. **`NetflowParser` interface:**
    ```java
@@ -301,7 +301,7 @@ netflow-java/
    }
    ```
 
-7. **`PacketDispatcher`** — Receives raw bytes and the exporter `InetAddress`. Reads version (first 2 bytes), resolves parser via factory (passing the exporter address to v9 for template cache scoping), dispatches parsed results to all registered handlers.
+7. **`PacketDispatcher`** — Receives raw bytes and the exporter `InetAddress`. **Minimum-length guard:** validates `data.length >= 2` before reading the version field; sub-2-byte datagrams are silently dropped with a DEBUG log (on an unauthenticated UDP listener these are expected noise). Reads version (first 2 bytes), resolves parser via factory (passing the exporter address to v9 for template cache scoping), dispatches parsed results to all registered handlers.
 
 8. **`FieldType` enum** — Maps known NetFlow field type IDs to names and default sizes:
    ```java
