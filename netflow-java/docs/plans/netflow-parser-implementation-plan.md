@@ -125,12 +125,24 @@ netflow-java/
                     ┌──────────────────┐
                     │  UdpPacketListener│  (Netty ChannelInboundHandler)
                     └────────┬─────────┘
-                             │  raw bytes
-                             ▼
+                            │  raw bytes
+                            ▼
                     ┌──────────────────┐
                     │ PacketDispatcher │  reads version field (first 2 bytes)
                     └───────┬──┬───────┘
                             │  │
+                            │  └────────────────────────────────────────────┐
+                            │                                               │
+                            ▼                                               │
+                 ┌────────────────────────────┐                             │
+                 │ IngestionBuffer / Queue    │  bounded; backpressure policy│
+                 │ (burst protection)         │  (drop-oldest/newest) + metrics
+                 └──────────────┬─────────────┘                             │
+                                │                                            │
+                                └────────────────────────────────────────────┘
+                                            parse-ready packets
+                                                   │
+                                                   ▼
                ┌────────────┘  └────────────┐
                ▼                            ▼
       ┌────────────────┐          ┌────────────────┐
@@ -207,6 +219,7 @@ netflow-java/
        buffer-size: 65535
    ```
 6. **Verify** — Application starts, binds UDP port, and logs incoming packets
+7. **Compatibility gate** — Confirm Spring Boot 4 + Spock build/test compatibility on CI and local toolchain before proceeding to parser milestones. If compatibility is unstable, switch integration tests to JUnit 5 while retaining Spock for unit specs where possible.
 
 **Deliverables:** Running Spring Boot app that receives UDP datagrams on port 2055 and logs them.
 
@@ -303,7 +316,9 @@ netflow-java/
 
 7. **`PacketDispatcher`** — Receives raw bytes and the exporter `InetAddress`. **Minimum-length guard:** validates `data.length >= 2` before reading the version field; sub-2-byte datagrams are silently dropped with a DEBUG log (on an unauthenticated UDP listener these are expected noise). Reads version (first 2 bytes), resolves parser via factory (passing the exporter address to v9 for template cache scoping), dispatches parsed results to all registered handlers.
 
-8. **`FieldType` enum** — Maps known NetFlow field type IDs to names and default sizes:
+8. **`IngestionBuffer` abstraction** — Introduce a bounded packet queue between UDP receive and parse stages with configurable capacity and overflow behavior (`drop-oldest` or `drop-newest`). Emit queue-depth and drop counters for observability.
+
+9. **`FieldType` enum** — Maps known NetFlow field type IDs to names and default sizes:
    ```java
    public enum FieldType {
        IN_BYTES(1, 4),
@@ -318,7 +333,7 @@ netflow-java/
    }
    ```
 
-9. **`FieldRegistry`** — Lookup utility to resolve `FieldType` by numeric ID. Supports unknown/vendor fields gracefully.
+10. **`FieldRegistry`** — Lookup utility to resolve `FieldType` by numeric ID. Supports unknown/vendor fields gracefully.
 
 **Deliverables:** Interfaces and models compiled; `PacketDispatcher` wires through to a `LoggingFlowHandler` that logs "parsed N flow records from version X".
 
@@ -375,7 +390,11 @@ netflow-java/
    - Parse header fields using unsigned operations (`& 0xFFFF`, `& 0xFFFFFFFFL`)
    - Parse each flow record; convert 4-byte IP fields to `InetAddress` then string
    - Return `ParseResult` with header + list of records
-   - Handle edge cases: truncated packets, count = 0, count > 30
+   - Handle edge cases with deterministic behavior:
+     - `count == 0`: accept packet, return empty record list, DEBUG log
+     - `count > 30`: reject packet as malformed, WARN log
+     - `actualLength != 24 + (count * 48)`: reject packet as malformed, WARN log
+     - truncated record while iterating: abort packet parse (no partial emit), WARN log
 
 4. **`LoggingFlowHandler`** — Logs each flow record with structured fields (uses `Optional`-aware accessors so missing v9 fields render as `N/A`):
    ```
@@ -478,6 +497,7 @@ netflow-java/
 8. **IP address handling** — Support both IPv4 (4 bytes) and IPv6 (16 bytes) based on field type
 
 9. **Wire V9Parser** — Register as a Spring bean; `ParserFactory` now resolves both v5 and v9
+10. **Malformed-packet robustness tests** — Add property-based or fuzz-style test inputs for v9 FlowSet parsing (invalid lengths, trailing bytes, template/data mismatches, overflow attempts) to verify all defensive guards.
 
 **Deliverables:** Application parses v9 template and data packets, caches templates, and logs decoded flow records.
 
@@ -618,8 +638,13 @@ netflow-java/
    - `CsvFlowHandler` declares `StorageService` as an `Optional` injection (`@Autowired(required = false)`) so it starts cleanly even when no backend is active.
 
 7. **Upload trigger** — `CsvFlowHandler` calls `StorageService.upload()` after each file rotation (if enabled). This runs asynchronously via `@Async` or a dedicated executor to avoid blocking the parsing pipeline.
+8. **Upload reliability contract** — Define and implement explicit failure semantics:
+   - Retry policy: exponential backoff with max-attempt limit
+   - Failure sink: move exhausted files to a dead-letter directory for manual replay
+   - Deletion rule: apply `delete-after-upload=true` only after confirmed remote success
+   - Metrics/logging: upload latency, retries, permanent failures, queue depth
 
-8. **Extensibility for future backends** — Adding a new storage:
+9. **Extensibility for future backends** — Adding a new storage:
    - Implement `StorageService`
    - Add a new value to `StorageType`
    - Add conditional bean configuration
@@ -749,6 +774,23 @@ logging:
 | **Large CSV files cause memory pressure**              | Low     | Buffered streaming writes; rotate files before they grow too large. |
 | **Network errors during storage upload**               | Medium  | Retry with exponential backoff. Keep local files until upload is confirmed. |
 | **Template cache memory growth**                       | Low     | Configurable max size + TTL. Evict oldest entries when limit is reached. |
+
+---
+
+## 7.1 Operational Metrics Baseline
+
+Define and expose a minimum metrics set from day one (Micrometer/Actuator compatible):
+
+- `netflow_packets_received_total`
+- `netflow_packets_parsed_total`
+- `netflow_packets_dropped_total` (tagged by reason: too_short, malformed, unknown_version, queue_overflow)
+- `netflow_sequence_gaps_total` (per exporter)
+- `netflow_ingestion_queue_depth`
+- `netflow_template_cache_entries`
+- `netflow_template_cache_evictions_total`
+- `netflow_upload_attempts_total`, `netflow_upload_failures_total`, `netflow_upload_latency`
+
+This turns packet-loss detection and operational diagnostics into explicit deliverables instead of ad-hoc logging.
 
 ---
 
