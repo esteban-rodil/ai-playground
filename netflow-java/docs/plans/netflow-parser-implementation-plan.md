@@ -423,9 +423,10 @@ netflow-java/
    ```
 
 4. **`TemplateCache`:**
-   - Thread-safe map keyed by composite key `(exporterIp, sourceId, templateId)` — the exporter IP is required because Source ID is only unique per exporter; different devices can (and commonly do) reuse the same Source ID (e.g., many Cisco routers default to `0`)
+   - Thread-safe map keyed by composite key `(exporterIp, exporterPort, sourceId, templateId)` — the exporter IP alone is not enough because in NATed deployments multiple exporters can share one collector-visible IP and reuse common Source IDs / template IDs. Including the UDP source port disambiguates distinct transport sessions behind the same NAT.
+   - **Trade-off note:** UDP source ports can change across device reboots or NAT remapping, which would orphan previously cached templates. The configurable TTL (below) handles cleanup; a DEBUG-level log is emitted when a template is re-learned under a new port for the same `(exporterIp, sourceId, templateId)` tuple.
    - Configurable TTL for template expiration (default: 30 minutes)
-   - `put(InetAddress exporterIp, Template)`, `get(InetAddress exporterIp, long sourceId, int templateId)` → `Optional<Template>`
+   - `put(ExporterKey key, Template)`, `get(ExporterKey key, int templateId)` → `Optional<Template>` where `ExporterKey` is `record ExporterKey(InetAddress ip, int port, long sourceId)`
    - Uses `ConcurrentHashMap` with periodic eviction or time-based check on read
    - Log warning when a Data FlowSet references an unknown template
 
@@ -466,6 +467,7 @@ netflow-java/
        - If found and `kind = FLOW`: decode as `V9FlowRecord` instances → emit to `FlowRecordHandler` chain
        - If found and `kind = OPTIONS`: decode as exporter metadata (sampling rate, interface info, etc.) → log at DEBUG level only; **do not** emit to `FlowRecordHandler` chain
    - Handle padding bytes at end of FlowSets (align to 32-bit boundary)
+   - **Zero-length template guard:** Before computing the record count, validate that `template.recordLength() > 0`. A malformed or empty template (zero fields) would cause `ArithmeticException` on the division and abort parsing for the entire packet — on an unauthenticated UDP collector this is a trivially repeatable failure. Templates with zero fields must be rejected at cache-insertion time (`TemplateCache.put` returns false and logs a WARN). As a defence-in-depth measure, the Data FlowSet loop also short-circuits with a WARN log if `recordLength() == 0` before the division.
    - Compute number of records per Data FlowSet: `(flowSetLength - 4) / template.recordLength()`
 
 8. **IP address handling** — Support both IPv4 (4 bytes) and IPv6 (16 bytes) based on field type
