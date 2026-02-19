@@ -532,14 +532,15 @@ netflow-java/
    - On file rotation, triggers storage upload (if storage is enabled)
 
 4. **Timestamp handling:**
-   - `firstSwitched` and `lastSwitched` are **exporter-uptime counters** (milliseconds since device boot), not Unix timestamps. The correct conversion per RFC 3954 is:
+   - `firstSwitched` and `lastSwitched` are **exporter-uptime counters** (milliseconds since device boot), not Unix timestamps. The correct conversion per RFC 3954 uses millisecond precision throughout:
      ```
-     absoluteTime = unixSecs - (sysUpTime - switchedTime) / 1000
+     exportEpochMs  = unixSecs * 1_000 + unixNSecs / 1_000_000
+     absoluteTimeMs = exportEpochMs - (sysUpTime - switchedTime)
      ```
-     Start from the packet's export wall-clock (`unixSecs`), subtract how long ago the flow started/ended relative to device uptime. Adding `switchedTime` directly would place records far in the future on long-running devices.
+     `unixNSecs` is the sub-second residual from the v5 header (`V5Header.unixNSecs`). Including it raises timestamp precision from whole-second to millisecond resolution, which matters for ordering flows that start/end within the same second (dropping it shifts emitted timestamps by up to ~999 ms). The uptime delta is already in milliseconds, so no unit conversion is needed for that term.
    - **32-bit uptime wrap:** Both `sysUpTime` and `switchedTime` are unsigned 32-bit millisecond counters that wrap every ~49.7 days. The delta `(sysUpTime - switchedTime)` must use **unsigned modular subtraction** (i.e., `Integer.toUnsignedLong(sysUpTime - switchedTime)` in Java) so that a flow that started before a wrap boundary and was exported after it still produces the correct positive offset instead of a large negative value that would corrupt the resulting timestamp.
    - Apply the same formula for both `firstSwitched` and `lastSwitched`
-   - Format result as ISO-8601
+   - Format result as ISO-8601 with millisecond precision (e.g. `2026-02-19T14:30:00.123Z`)
 
 **Deliverables:** CSV files are generated in the output directory with correct headers and flow data. Files rotate per configuration.
 
