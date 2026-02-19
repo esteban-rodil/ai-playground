@@ -249,9 +249,21 @@ netflow-java/
         */
        Optional<Object> getField(FieldType fieldType);
 
-       /** Convenience accessors — return Optional to accommodate v9 templates that may omit fields. */
-       default Optional<String> srcAddress()  { return getField(FieldType.IPV4_SRC_ADDR).map(Object::toString); }
-       default Optional<String> dstAddress()  { return getField(FieldType.IPV4_DST_ADDR).map(Object::toString); }
+       /**
+        * Convenience accessors — return Optional to accommodate v9 templates that may omit fields.
+        * Address accessors fall back to the IPv6 field type when the IPv4 field is absent,
+        * so both address families are represented correctly in logs and CSV output.
+        */
+       default Optional<String> srcAddress() {
+           return getField(FieldType.IPV4_SRC_ADDR)
+               .or(() -> getField(FieldType.IPV6_SRC_ADDR))
+               .map(Object::toString);
+       }
+       default Optional<String> dstAddress() {
+           return getField(FieldType.IPV4_DST_ADDR)
+               .or(() -> getField(FieldType.IPV6_DST_ADDR))
+               .map(Object::toString);
+       }
        default Optional<Integer> srcPort()    { return getField(FieldType.L4_SRC_PORT).map(v -> (Integer) v); }
        default Optional<Integer> dstPort()    { return getField(FieldType.L4_DST_PORT).map(v -> (Integer) v); }
        default Optional<Integer> protocol()   { return getField(FieldType.PROTOCOL).map(v -> (Integer) v); }
@@ -380,21 +392,28 @@ netflow-java/
 
 **Tasks:**
 
-1. **`Template` record:**
+1. **`TemplateKind` enum** — distinguishes regular flow templates from options templates so the parser can route them correctly:
+   ```java
+   public enum TemplateKind { FLOW, OPTIONS }
+   ```
+
+2. **`Template` record:**
    ```java
    public record Template(
        int templateId,
        long sourceId,
+       TemplateKind kind,        // FLOW or OPTIONS
        List<FieldDefinition> fields,
        Instant receivedAt
    ) {
        public int recordLength() {
            return fields.stream().mapToInt(FieldDefinition::length).sum();
        }
+       public boolean isOptions() { return kind == TemplateKind.OPTIONS; }
    }
    ```
 
-2. **`FieldDefinition` record:**
+3. **`FieldDefinition` record:**
    ```java
    public record FieldDefinition(int typeId, int length) {
        public Optional<FieldType> fieldType() {
@@ -403,14 +422,14 @@ netflow-java/
    }
    ```
 
-3. **`TemplateCache`:**
+4. **`TemplateCache`:**
    - Thread-safe map keyed by composite key `(exporterIp, sourceId, templateId)` — the exporter IP is required because Source ID is only unique per exporter; different devices can (and commonly do) reuse the same Source ID (e.g., many Cisco routers default to `0`)
    - Configurable TTL for template expiration (default: 30 minutes)
    - `put(InetAddress exporterIp, Template)`, `get(InetAddress exporterIp, long sourceId, int templateId)` → `Optional<Template>`
    - Uses `ConcurrentHashMap` with periodic eviction or time-based check on read
    - Log warning when a Data FlowSet references an unknown template
 
-4. **`V9Header` record:**
+5. **`V9Header` record:**
    ```java
    public record V9Header(
        int count,
@@ -421,7 +440,7 @@ netflow-java/
    ) implements FlowHeader { ... }
    ```
 
-5. **`V9FlowRecord`** — Dynamic key-value record:
+6. **`V9FlowRecord`** — Dynamic key-value record:
    ```java
    public record V9FlowRecord(
        Map<FieldType, Object> fields,
@@ -437,18 +456,21 @@ netflow-java/
    }
    ```
 
-6. **`V9Parser` implementation:**
+7. **`V9Parser` implementation:**
    - Parse 20-byte header
    - Loop through FlowSets based on remaining bytes:
-     - **FlowSet ID = 0 (Template FlowSet):** Parse template definitions, store in `TemplateCache`
-     - **FlowSet ID = 1 (Options Template FlowSet):** Parse and cache (similar to templates)
-     - **FlowSet ID > 255 (Data FlowSet):** Look up template by FlowSet ID; if found, decode records using field definitions; if not found, skip with warning
+     - **FlowSet ID = 0 (Template FlowSet):** Parse template definitions, store in `TemplateCache` with `kind = FLOW`
+     - **FlowSet ID = 1 (Options Template FlowSet):** Parse scope/option field definitions, store in `TemplateCache` with `kind = OPTIONS`
+     - **FlowSet ID > 255 (Data FlowSet):** Look up template by FlowSet ID:
+       - If not found: skip with warning (template not yet received)
+       - If found and `kind = FLOW`: decode as `V9FlowRecord` instances → emit to `FlowRecordHandler` chain
+       - If found and `kind = OPTIONS`: decode as exporter metadata (sampling rate, interface info, etc.) → log at DEBUG level only; **do not** emit to `FlowRecordHandler` chain
    - Handle padding bytes at end of FlowSets (align to 32-bit boundary)
    - Compute number of records per Data FlowSet: `(flowSetLength - 4) / template.recordLength()`
 
-7. **IP address handling** — Support both IPv4 (4 bytes) and IPv6 (16 bytes) based on field type
+8. **IP address handling** — Support both IPv4 (4 bytes) and IPv6 (16 bytes) based on field type
 
-8. **Wire V9Parser** — Register as a Spring bean; `ParserFactory` now resolves both v5 and v9
+9. **Wire V9Parser** — Register as a Spring bean; `ParserFactory` now resolves both v5 and v9
 
 **Deliverables:** Application parses v9 template and data packets, caches templates, and logs decoded flow records.
 
@@ -600,8 +622,8 @@ netflow-java/
 | Spec                        | What It Verifies                                                  |
 |-----------------------------|-------------------------------------------------------------------|
 | `V5ParserSpec`              | Parses valid v5 packets; rejects truncated, wrong-version, count=0 |
-| `V9ParserSpec`              | Parses templates + data; handles missing templates, padding        |
-| `TemplateCacheSpec`         | Put/get, TTL expiration, thread safety                            |
+| `V9ParserSpec`              | Parses templates + data; options data skipped from flow pipeline; handles missing templates, padding |
+| `TemplateCacheSpec`         | Put/get, TTL expiration, thread safety, FLOW vs OPTIONS kind distinction |
 | `PacketDispatcherSpec`      | Correct parser selection by version; unknown version handling      |
 | `FieldRegistrySpec`         | Lookup known types, handle unknown type IDs                       |
 | `CsvWriterSpec`             | Correct CSV format, header row, field mapping, rotation triggers  |
