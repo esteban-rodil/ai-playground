@@ -39,18 +39,33 @@ Each story follows this structure:
 
 ### M1.S1 — Initialize Maven Project
 
+> **Status:** ✅ Done
+
 **Description:**
 Create the root `pom.xml` with all required dependencies and plugins for the project. This establishes the build foundation that all subsequent milestones depend on.
 
 **Acceptance Criteria:**
-- [ ] `pom.xml` exists at `netflow-java/` root with `com.netflow` group ID
-- [ ] Java 21 is configured as the source and target version
-- [ ] Spring Boot 4.0.x parent POM or BOM is declared
-- [ ] Dependencies declared: `spring-boot-starter`, `netty-transport`, `spock-core`, `spock-spring` (2.4-groovy-5.0), `groovy` (5.0.x), `testcontainers` BOM, `apache-commons-csv`
-- [ ] Maven compiler plugin targets Java 21
-- [ ] GMavenPlus plugin is configured for compiling Groovy test sources
-- [ ] `mvn clean compile` succeeds with zero errors
-- [ ] `mvn test` runs (even if no tests exist yet) without build failures
+- [x] `pom.xml` exists at `netflow-java/` root with `com.netflow` group ID
+- [x] Java 21 is configured as the source and target version
+- [x] Spring Boot 4.0.x parent POM or BOM is declared
+- [x] Dependencies declared: `spring-boot-starter`, `netty-transport`, `spock-core`, `spock-spring` (2.4-groovy-5.0), `groovy` (5.0.x), `testcontainers` BOM, `apache-commons-csv`
+- [x] Maven compiler plugin targets Java 21
+- [x] GMavenPlus plugin is configured for compiling Groovy test sources
+- [x] `mvn clean compile` succeeds with zero errors
+- [x] `mvn test` runs (even if no tests exist yet) without build failures
+
+**Implementation Notes:**
+| Decision | Value | Rationale |
+|----------|-------|-----------|
+| Spring Boot version | `4.0.3` | Latest stable Spring Boot 4.x release; brings Spring Framework 7.0.5 and Jakarta EE 11 |
+| `netty-transport` version | `4.2.10.Final` | Managed by Spring Boot 4.0.3 BOM via `${netty.version}`; no explicit version needed in `pom.xml` |
+| Groovy version | `5.0.4` | Latest stable Groovy 5.x; required for Spock 2.4-groovy-5.0 compatibility |
+| Spock version | `2.4-groovy-5.0` | Latest Spock 2.4 release; uses JUnit Platform (compatible with Spring Boot 4 test runner) |
+| GMavenPlus version | `3.0.2` | Compiles `src/test/groovy` sources during `test-compile` phase |
+| Testcontainers BOM | `2.0.3` | Manages Testcontainers module versions; no individual versions needed for future integration tests |
+| `commons-csv` version | `1.14.1` | Not managed by Spring Boot BOM; explicit version required |
+| `maven.resolver.transport` | `wagon` | Java 11+ `HttpClient` (the default transport in Maven 3.9.x) does not honour `Proxy-Authorization` for HTTPS CONNECT tunnels when set via system properties alone; the classic `wagon-http` transport reads the proxy credentials from `~/.m2/settings.xml` and handles the 407 challenge correctly in this proxy-authenticated environment |
+| Maven directory layout | `src/main/java`, `src/main/resources`, `src/test/groovy`, `src/test/resources` | Standard Maven convention; GMavenPlus picks up `src/test/groovy` automatically |
 
 **Dependencies:** None
 **Estimated Effort:** S
