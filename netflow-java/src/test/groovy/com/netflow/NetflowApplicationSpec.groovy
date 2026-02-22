@@ -13,11 +13,11 @@ class NetflowApplicationSpec extends Specification {
 
     def "application context loads successfully"() {
         expect:
-        context != null
+            context != null
     }
 
     def "NetflowApplication bean is registered"() {
         expect:
-        context.containsBean("netflowApplication")
+            context.containsBean("netflowApplication")
     }
 }
