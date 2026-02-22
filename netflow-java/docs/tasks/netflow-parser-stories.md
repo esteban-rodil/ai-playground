@@ -74,15 +74,17 @@ Create the root `pom.xml` with all required dependencies and plugins for the pro
 
 ### M1.S2 — Create Spring Boot Application Entry Point
 
+> **Status:** ✅ Done
+
 **Description:**
 Create the `NetflowApplication.java` main class annotated with `@SpringBootApplication`. This is the bootstrap entry point for the entire application.
 
 **Acceptance Criteria:**
-- [ ] `NetflowApplication.java` exists at `src/main/java/com/netflow/`
-- [ ] Class is annotated with `@SpringBootApplication`
-- [ ] Contains a standard `public static void main(String[] args)` method
-- [ ] Application starts successfully via `mvn spring-boot:run` (even without listeners)
-- [ ] Application context loads without errors
+- [x] `NetflowApplication.java` exists at `src/main/java/com/netflow/`
+- [x] Class is annotated with `@SpringBootApplication`
+- [x] Contains a standard `public static void main(String[] args)` method
+- [x] Application starts successfully via `mvn spring-boot:run` (even without listeners)
+- [x] Application context loads without errors
 
 **Dependencies:** M1.S1
 **Estimated Effort:** XS
