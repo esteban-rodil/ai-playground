@@ -122,12 +122,72 @@ This project will be implemented in phases:
 
 ## Build & Run
 
-> Build configuration coming soon (Maven/Gradle).
+### Prerequisites
+
+- Java 17+
+- Maven 3.9.0+
+- Python 3.6+ (for build helper in restricted networks)
+
+### Building the Project
+
+#### Standard Build (Direct Network Access)
 
 ```bash
-# Example (once implemented)
+# Compile only
+mvn clean compile
+
+# Build JAR
 mvn clean package
+
+# Run with tests
+mvn clean verify
+```
+
+#### Build in Network-Isolated Environments
+
+If you're behind a corporate proxy or in a container with restricted network access, use the Maven Proxy Build Helper:
+
+```bash
+# Using the bash wrapper (simplest)
+./scripts/build-helper/build.sh clean compile
+
+# Or using Python directly
+python3 scripts/build-helper/maven-proxy-build.py clean compile
+
+# Build JAR
+./scripts/build-helper/build.sh clean package
+```
+
+**Why this is needed:** Maven has known compatibility issues with HTTPS proxy authentication. This script starts a local HTTP server that uses `curl` (which handles proxy auth correctly) to transparently download artifacts.
+
+For detailed information, troubleshooting, and advanced usage, see [scripts/build-helper/README.md](scripts/build-helper/README.md).
+
+### Running the Application
+
+Once built:
+
+```bash
+# Run the NetFlow collector
 java -jar target/netflow-java.jar --port 2055
+
+# Or with custom configuration
+java -jar target/netflow-java.jar \
+  --port 2055 \
+  --host 0.0.0.0 \
+  --log-level DEBUG
+```
+
+### Development Build
+
+For continuous development:
+
+```bash
+# Compile and run tests on each change
+mvn clean compile
+mvn test
+
+# Skip tests for faster iteration
+mvn clean compile -DskipTests
 ```
 
 ## License
