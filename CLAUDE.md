@@ -141,9 +141,7 @@ When completing a story (e.g., M1.S2):
 
 ## EditorConfig Compliance
 
-Repository uses `.editorconfig` files at:
-- `/home/user/ai-playground/.editorconfig` (root rules)
-- `/home/user/ai-playground/netflow-java/.editorconfig` (Spock conventions)
+Repository uses a single `.editorconfig` at the root (`/home/user/ai-playground/.editorconfig`) covering all file types including Spock test conventions.
 
 These settings are automatically enforced by compatible editors/IDEs (VS Code, IntelliJ, etc.).
 

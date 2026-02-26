@@ -19,6 +19,12 @@ indent_size = 4
 indent_style = space
 indent_size = 4
 
+# Groovy Spock test files (same indent, but Spock convention: labels at method level,
+# code within blocks indented 4 more spaces — enforced by CLAUDE.md, not EditorConfig)
+[*Spec.groovy]
+indent_style = space
+indent_size = 4
+
 # XML files
 [*.xml]
 indent_style = space
