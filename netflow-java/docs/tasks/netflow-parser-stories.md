@@ -93,15 +93,17 @@ Create the `NetflowApplication.java` main class annotated with `@SpringBootAppli
 
 ### M1.S3 — Create Default Application Configuration
 
+> **Status:** ✅ Done
+
 **Description:**
 Create the `application.yml` with baseline configuration properties for the UDP listener (port, buffer size). This externalizes settings so they can be overridden per environment.
 
 **Acceptance Criteria:**
-- [ ] `application.yml` exists at `src/main/resources/`
-- [ ] Contains `netflow.listener.port` defaulting to `2055`
-- [ ] Contains `netflow.listener.buffer-size` defaulting to `65535`
-- [ ] Contains `netflow.listener.worker-threads` defaulting to `4`
-- [ ] Application starts and binds properties correctly
+- [x] `application.yml` exists at `src/main/resources/`
+- [x] Contains `netflow.listener.port` defaulting to `2055`
+- [x] Contains `netflow.listener.buffer-size` defaulting to `65535`
+- [x] Contains `netflow.listener.worker-threads` defaulting to `4`
+- [x] Application starts and binds properties correctly
 
 **Dependencies:** M1.S2
 **Estimated Effort:** XS

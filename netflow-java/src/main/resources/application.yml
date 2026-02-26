@@ -1,0 +1,5 @@
+netflow:
+  listener:
+    port: 2055
+    buffer-size: 65535
+    worker-threads: 4
