@@ -107,6 +107,9 @@
                 <groupId>org.codehaus.gmavenplus</groupId>
                 <artifactId>gmavenplus-plugin</artifactId>
                 <version>3.0.2</version>
+                <configuration>
+                    <targetBytecode>21</targetBytecode>
+                </configuration>
                 <executions>
                     <execution>
                         <goals>
@@ -114,6 +117,18 @@
                         </goals>
                     </execution>
                 </executions>
+            </plugin>
+
+            <!-- Surefire: include Spock *Spec classes -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <includes>
+                        <include>**/*Spec.class</include>
+                        <include>**/*Test.class</include>
+                    </includes>
+                </configuration>
             </plugin>
         </plugins>
     </build>

@@ -142,10 +142,10 @@ def main():
             self.send_response(code)
             self.end_headers()
 
-        def log_message(self, *args):
+        def log_message(self, format, *log_args):
             """Suppress request logging unless verbose"""
             if args.verbose:
-                super().log_message(*args)
+                super().log_message(format, *log_args)
 
     # Start the local proxy server
     print('\n🔧 Starting local Maven proxy server...')
